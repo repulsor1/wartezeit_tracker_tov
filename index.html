@@ -133,6 +133,19 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:-a
 
 .empty { text-align:center; padding:40px 0; color:var(--text3); font-size:14px; }
 
+/* Edit modal */
+.edit-field { margin-bottom:14px; }
+.edit-label { font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:var(--text3); margin-bottom:8px; display:block; }
+.edit-toggle-row { display:flex; gap:10px; }
+.edit-toggle { flex:1; padding:10px; border-radius:12px; border:0.5px solid var(--border2); background:var(--surface); color:var(--text2); font-size:14px; font-weight:600; cursor:pointer; text-align:center; transition:all 0.15s; }
+.edit-toggle.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+.edit-number-row { display:flex; align-items:center; gap:10px; }
+.edit-num-btn { width:36px; height:36px; border-radius:10px; border:0.5px solid var(--border2); background:var(--surface); color:var(--text); font-size:20px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.edit-num-val { flex:1; text-align:center; font-size:22px; font-weight:700; color:var(--text); }
+.edit-note { width:100%; padding:10px 12px; background:var(--surface); border:0.5px solid var(--border2); border-radius:12px; color:var(--text); font-size:14px; outline:none; resize:none; font-family:inherit; }
+.edit-note::placeholder { color:var(--text3); }
+.log-row-edit { font-size:11px; color:var(--accent2); margin-top:2px; }
+
 /* Modal */
 .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); display:flex; align-items:flex-end; justify-content:center; z-index:100; padding:0 0 max(env(safe-area-inset-bottom,0px),16px); }
 .modal-overlay.hidden { display:none; }
@@ -148,7 +161,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:-a
   <!-- Header -->
   <div class="header">
     <div class="header-row">
-      <div class="header-title">Wartezeit<span>Tracker v0.10</span></div>
+      <div class="header-title">Wartezeit<span>Tracker v0.12</span></div>
       <div class="live-badge off" id="live-badge"><div class="live-dot"></div><span id="live-label">Demo</span></div>
     </div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-top:8px;">
@@ -291,6 +304,52 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:-a
   </div>
 </div>
 
+<!-- Modal: Eintrag bearbeiten -->
+<div class="modal-overlay hidden" id="modal-edit">
+  <div class="modal-box">
+    <div class="modal-title" id="edit-title">Eintrag bearbeiten</div>
+
+    <div class="edit-field">
+      <span class="edit-label">Extras</span>
+      <div class="edit-toggle-row">
+        <div class="edit-toggle" id="tog-sr" onclick="toggleEdit('sr')">Single Rider</div>
+        <div class="edit-toggle" id="tog-vq" onclick="toggleEdit('vq')">Virtual Queue</div>
+      </div>
+    </div>
+
+    <div class="edit-field">
+      <span class="edit-label">Reihe</span>
+      <div class="edit-number-row">
+        <button class="edit-num-btn" onclick="changeRow(-1)">−</button>
+        <div class="edit-num-val" id="edit-row-val">–</div>
+        <button class="edit-num-btn" onclick="changeRow(1)">+</button>
+      </div>
+    </div>
+
+    <div class="edit-field">
+      <span class="edit-label">Notiz</span>
+      <textarea class="edit-note" id="edit-note" rows="2" placeholder="z.B. Reihe links, Gewitter…"></textarea>
+    </div>
+
+    <div class="modal-btn-row">
+      <button class="btn btn-primary" onclick="saveEdit()">Speichern</button>
+      <button class="btn btn-ghost"   onclick="closeModalEdit()">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Abbrechen bestätigen -->
+<div class="modal-overlay hidden" id="modal-cancel">
+  <div class="modal-box">
+    <div class="modal-title">Messung abbrechen?</div>
+    <div class="modal-desc">Die aktuelle Messung wird nicht gespeichert.</div>
+    <div class="modal-btn-row">
+      <button class="btn btn-danger"  onclick="confirmCancel()">Ja, abbrechen</button>
+      <button class="btn btn-primary" onclick="closeModalCancel()">Weiter messen</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Löschen bestätigen -->
 <div class="modal-overlay hidden" id="modal-delete">
   <div class="modal-box">
@@ -349,9 +408,9 @@ const RIDES = [
   {name:"Morrels Truckjes",      cat:"kinder",     wait:8 },
 ];
 
-const CATS = {achterbahn:"Achterbahn", dark:"Dark Ride / Show", wasser:"Wasserfahrt", kinder:"Kinder"};
+const CATS = {achterbahn:"Achterbahn", dark:"Dark Ride / Show", wasser:"Wasserfahrt", kinder:"Kinderfahrt"};
 
-// Live-Wartezeiten per CORS-Proxy von queue-times.com (Park-ID 56 = Phantasialand)
+// Live-Wartezeiten per CORS-Proxy von queue-times.com (Park-ID 305 = Toverland)
 let liveWaits = {};   // name → Minuten
 let liveWaitsById = {}; // id → Minuten
 let liveLoaded = false;
@@ -499,15 +558,33 @@ function stopTimer(){
   go('s-result');
 }
 
-function cancelTimer(){ clearInterval(timerInterval); localStorage.removeItem('wt_active'); elapsed=0; go('s-select'); }
+function askCancel(){
+  document.getElementById('modal-cancel').classList.remove('hidden');
+}
+function closeModalCancel(){
+  document.getElementById('modal-cancel').classList.add('hidden');
+}
+function confirmCancel(){
+  clearInterval(timerInterval);
+  localStorage.removeItem('wt_active');
+  elapsed=0;
+  closeModalCancel();
+  go('s-select');
+}
 
 function renderLog(){
   const w=document.getElementById('log-wrap');
   if(!log.length){ w.innerHTML=''; return; }
-  const rows=log.map(e=>{
+  const rows=log.map((e,i)=>{
     const m=Math.floor(e.measuredS/60), s=e.measuredS%60;
     const d=e.diff===0?'±0':e.diff>0?'+'+e.diff+'min':e.diff+'min';
-    return `<tr><td>${e.ride}</td><td>${e.startTime||'–'}</td><td>${m}:${pad(s)}</td><td>${e.statedMin}</td><td>${d}</td></tr>`;
+    const extras=[];
+    if(e.sr) extras.push('SR');
+    if(e.vq) extras.push('VQ');
+    if(e.row) extras.push('R'+e.row);
+    if(e.note) extras.push('"'+e.note+'"');
+    const extStr=extras.length?'<div class="log-row-edit">'+extras.join(' ')+'</div>':'<div class="log-row-edit" style="color:var(--text3)">✏️ tippen zum Bearbeiten</div>';
+    return `<tr onclick="openEdit(${i})" style="cursor:pointer"><td><div>${e.ride}</div>${extStr}</td><td>${e.startTime||'–'}</td><td>${m}:${pad(s)}</td><td>${e.statedMin}</td><td>${d}</td></tr>`;
   }).join('');
   w.innerHTML=`<div class="log-title">Heutige Messungen (${log.length})</div>
   <table class="log-table">
@@ -520,7 +597,12 @@ function buildText(){
   return log.map(e=>{
     const endH = e.endTime ? e.endTime.replace(':','').replace(' Uhr','') : '–';
     const measMin = Math.floor(e.measuredS/60);
-    return e.ride+' '+endH+' '+measMin+'/'+e.statedMin;
+    const extras=[];
+    if(e.sr) extras.push('SR');
+    if(e.vq) extras.push('VQ');
+    if(e.row) extras.push('R'+e.row);
+    if(e.note) extras.push('"'+e.note+'"');
+    return e.ride+' '+endH+' '+measMin+'/'+e.statedMin+(extras.length?' '+extras.join(' '):'');
   }).join('\n');
 }
 
@@ -563,6 +645,49 @@ function confirmDelete(){
   document.getElementById('log-count').textContent=0;
   closeModal();
   go('s-select');
+}
+
+// ── Eintrag bearbeiten ──
+let editIndex = -1;
+let editSr = false, editVq = false, editRow = 0;
+
+function openEdit(i) {
+  editIndex = i;
+  const e = log[i];
+  editSr = e.sr || false;
+  editVq = e.vq || false;
+  editRow = e.row || 0;
+  document.getElementById('edit-title').textContent = e.ride;
+  document.getElementById('tog-sr').className = 'edit-toggle' + (editSr ? ' on' : '');
+  document.getElementById('tog-vq').className = 'edit-toggle' + (editVq ? ' on' : '');
+  document.getElementById('edit-row-val').textContent = editRow || '–';
+  document.getElementById('edit-note').value = e.note || '';
+  document.getElementById('modal-edit').classList.remove('hidden');
+}
+
+function toggleEdit(field) {
+  if(field==='sr'){ editSr=!editSr; document.getElementById('tog-sr').className='edit-toggle'+(editSr?' on':''); }
+  if(field==='vq'){ editVq=!editVq; document.getElementById('tog-vq').className='edit-toggle'+(editVq?' on':''); }
+}
+
+function changeRow(d) {
+  editRow = Math.max(0, editRow + d);
+  document.getElementById('edit-row-val').textContent = editRow || '–';
+}
+
+function saveEdit() {
+  if(editIndex < 0) return;
+  log[editIndex].sr   = editSr;
+  log[editIndex].vq   = editVq;
+  log[editIndex].row  = editRow || null;
+  log[editIndex].note = document.getElementById('edit-note').value.trim() || null;
+  localStorage.setItem('wt_log', JSON.stringify(log));
+  renderLog();
+  closeModalEdit();
+}
+
+function closeModalEdit() {
+  document.getElementById('modal-edit').classList.add('hidden');
 }
 
 function go(id){
